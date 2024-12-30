@@ -1,0 +1,488 @@
+## all credit to for original plotting Zeno Muscarella @ZenoIsMyName_ on Twitter/X
+## code has been updated and altered in order to fit our goals and dataset
+# The following code presents functions needed to generate both split second frames of a given play
+# as well as a function to generate a animated gif
+
+#### load packages ####
+library(ggplot2)
+library(gganimate)
+
+#### Directional Plot Function ####
+#' Create directional data visualization for football plays
+#' 
+#' @param playId Play Identifier.
+#' @param frameId Frame Identifier; if 0, returns the entire play data.
+#' @param df Dataframe containing data for plots (singular frame).
+#' @param position_groups_to_show String to indicate position group ('all', 'offense', or 'defense') for vector display.
+#' @param scale_arrows_by Numeric value to adjust vector length scale.
+#' @param movement_vector Indicates whether to use acceleration ('a') or speed ('s') as vector basis.
+#' @param max_play_desc_len Maximum length of the play description to display in subtitle.
+#' @export
+
+build_directional_plot <- function(gameId,
+                                   playId,
+                                   frameId,                                
+                                   df, 
+                                   position_groups_to_show = 'all', 
+                                   scale_arrows_by = 1, 
+                                   movement_vector = 'a',
+                                   max_play_desc_len = 80) {
+  # Set title and scalar based on movement_vector
+  if (movement_vector == 'a') {
+    df$scalar <- df$a
+    title <- 'Pre-Snap Acceleration Vectors for'
+  } else if (movement_vector == 's') {
+    df$scalar <- df$s
+    title <- 'Pre-Snap Speed Vectors for'
+  }
+  
+  # Filter data to the specific game, play, and frame
+  sample_play <- df %>%
+    dplyr::filter(gameId == gameId, playId == playId, frameId == frameId) %>%
+    mutate(
+      xnew = 2 * scale_arrows_by * scalar * cos(dir_new * pi / 180) * deltaxsign + x,
+      ynew = 2 * scale_arrows_by * scalar * sin(dir_new * pi / 180) * deltaysign + y,
+      playdescriptiontruncated = str_sub(playDescription, 1, max_play_desc_len),
+      # Assign primary and secondary colors based on home/visitor team affiliation
+      teamPrimaryColor = ifelse(club == homeTeamAbbr, homeTeamPrimaryColor, visitorTeamPrimaryColor),
+      teamSecondaryColor = ifelse(club == homeTeamAbbr, homeTeamSecondaryColor, visitorTeamSecondaryColor),
+      positionShape = ifelse(position %in% c('WR', 'TE', 'T', 'QB', 'RB', 'C', 'G', 'FB'), 'circle', 'triangle')
+    )
+  
+  # Extract the absoluteYardlineNumber and YardsToGo from df_play_full
+  absoluteYardlineNumber <- df %>%
+    dplyr::filter(gameId == gameId, playId == playId, frameId == frameId) %>%
+    pull(absoluteYardlineNumber)
+  
+  yardsToGo <- df %>%
+    dplyr::filter(gameId == gameId, playId == playId, frameId == frameId) %>%
+    pull(yardsToGo)
+  
+  yards_to_success <- df %>%
+    dplyr::filter(gameId == gameId, playId == playId, frameId == frameId) %>%
+    pull(yards_to_success)  
+  
+  # Calculate the first down line's Y position
+  first_down_y_position <- absoluteYardlineNumber + yardsToGo
+  
+  success_y_position <- absoluteYardlineNumber + yards_to_success
+  
+  # Title and subtitle
+  title <- paste(
+    title,
+    sample_play %>% distinct(homeTeamAbbr) %>% pull(.),
+    'v',
+    sample_play %>% distinct(visitorTeamAbbr) %>% pull(.),
+    sample_play %>% distinct(gameDate) %>% pull(.),
+    sep = ' '
+  )
+  subtitle <- paste(
+    ' FrameId:', sample_play %>% distinct(frameId) %>% pull(.),
+    ' Event:', sample_play %>% distinct(event) %>% pull(.),
+    ' PlayDesc:', sample_play %>% distinct(playdescriptiontruncated) %>% pull(.),
+    sep = '\n'
+  )
+  
+  # Define positions to show
+  def_positions <- c('SS', 'DE', 'ILB', 'FS', 'CB', 'DT', 'NT', 'OLB')
+  off_positions <- c('WR', 'TE', 'T', 'QB', 'RB', 'C', 'G', 'FB')
+  positions_to_show <- switch(
+    tolower(position_groups_to_show),
+    'offense' = off_positions,
+    'defense' = def_positions,
+    off_positions
+  )
+  
+  # Field boundaries
+  xmin <- 0
+  xmax <- 160 / 3
+  ymin <- max(round(min(sample_play$x, na.rm = TRUE) - 10, -1), 0)
+  ymax <- min(round(max(sample_play$x, na.rm = TRUE) + 10, -1), 120)
+  
+  # Generate hash marks data for field
+  df.hash <- expand.grid(x = c(0, 23.36667, 29.96667, xmax), y = (10:110))
+  df.hash <- df.hash %>% filter(!(floor(y %% 5) == 0)) %>% filter(y < ymax, y > ymin)
+  
+  # Start building plot
+  plot <- sample_play %>%
+    ggplot(aes(x = (xmax - y), y = x)) +
+    
+    # Add the blue line for absoluteYardlineNumber
+    annotate("segment", 
+             x = xmin, xend = xmax, 
+             y = absoluteYardlineNumber, yend = absoluteYardlineNumber,
+             color = "blue", size = 1.5, lineend = "round") +
+    
+    # Add the yellow line for the first down line
+    annotate("segment", 
+             x = xmin, xend = xmax, 
+             y = first_down_y_position, yend = first_down_y_position,
+             color = "yellow", size = 1.5, lineend = "round") +
+    
+    # Add the green line for the first down line
+    annotate("segment", 
+             x = xmin, xend = xmax, 
+             y = success_y_position, yend = success_y_position,
+             color = "green", size = 1.5, lineend = "round") +    
+    
+    # Adding field lines and hash marks
+    annotate("text", x = df.hash$x[df.hash$x < 55/2], 
+             y = df.hash$y[df.hash$x < 55/2], label = "_", hjust = 0, vjust = -0.2, na.rm = TRUE) + 
+    annotate("text", x = df.hash$x[df.hash$x > 55/2], 
+             y = df.hash$y[df.hash$x > 55/2], label = "_", hjust = 1, vjust = -0.2, na.rm = TRUE) + 
+    annotate("segment", x = xmin, 
+             y = seq(max(10, ymin), min(ymax, 110), by = 5), 
+             xend = xmax, 
+             yend = seq(max(10, ymin), min(ymax, 110), by = 5), na.rm = TRUE) + 
+    annotate("text", x = rep(12, 11), y = seq(10, 110, by = 10), 
+             label = c("G   ", seq(10, 50, by = 10), rev(seq(10, 40, by = 10)), "   G"), 
+             angle = 270, size = 4, na.rm = TRUE) + 
+    annotate("text", x = rep((xmax - 12), 11), y = seq(10, 110, by = 10), 
+             label = c("   G", seq(10, 50, by = 10), rev(seq(10, 40, by = 10)), "G   "), 
+             angle = 90, size = 4, na.rm = TRUE) + 
+    annotate("segment", x = c(xmin, xmin, xmax, xmax), 
+             y = c(ymin, ymax, ymax, ymin), 
+             xend = c(xmin, xmax, xmax, xmin), 
+             yend = c(ymax, ymax, ymin, ymin), colour = "black", na.rm = TRUE) + 
+    
+    # Adding player positions and primary color
+    geom_point(aes(shape = positionShape, color = teamPrimaryColor, group = nflId), size = 8) +
+    scale_color_identity() +
+    scale_shape_manual(values = c("circle" = 16, "triangle" = 17)) +
+    
+    # Arrow segments for players in specified positions
+    geom_segment(
+      data = . %>% filter(position %in% positions_to_show),
+      aes(xend = (xmax - ynew), yend = xnew),
+      arrow = arrow(angle = 20, type = 'closed', length = unit(0.2, 'cm'))
+    ) +
+    
+    # Jersey numbers as text labels with secondary team color
+    geom_text(aes(label = jerseyNumber, color = teamSecondaryColor), size = 5) +
+    
+    # Adding a point for the football
+    geom_point(
+      data = sample_play %>% filter(club == "football"),
+      aes(x = (xmax - y), y = x),
+      shape = 21, fill = "brown", color = "black", size = 5
+    ) +
+    # Labels, titles, and captions
+    labs(
+      x = NULL, y = NULL,
+      title = title,
+      subtitle = str_wrap(subtitle, 80),
+      caption = paste0("Data: 2025 Big Data Bowl Pre-Snap Tracking Data\n", 
+                       "GameId: ", unique(sample_play$gameId), '\n', 
+                       "PlayId: ", unique(sample_play$playId))
+    ) +
+    theme_bw() +
+    ylim(ymin, ymax) +
+    guides(shape = "none") +
+    theme(axis.text = element_blank())
+  
+  return(plot)
+}
+
+
+#### get_pre_snap_moment function ####
+#' gets a singular play or frame from the full dataset 
+#' 
+#' @param base_data list of data frame objects: `plays`, `games`, `player_play`, `players`
+#' @param week - week of season 1-9
+#' @param gameid - gameId desired
+#' @param playid - play desired
+#' @param frameid - frame desired. if 0 then entire play data is returned. 
+#' @export
+
+get_pre_snap_moment <- function(base_data, week, gameid, playid, frameid) {
+  
+  # Define team colors data frame within the function
+  team_colors <- data.frame(
+    Abbreviation = c("ARI", "ATL", "BAL", "BUF", "CAR", "CHI", "CIN", "CLE",
+                     "DAL", "DEN", "DET", "GB", "HOU", "IND", "JAX", "KC",
+                     "LV", "LAC", "LA", "MIA", "MIN", "NE", "NO", "NYG",
+                     "NYJ", "PHI", "PIT", "SF", "SEA", "TB", "TEN", "WAS"),
+    PrimaryColor = c("#97233F", "#A71930", "#241773", "#00338D", "#0085CA", 
+                     "#C83803", "#FB4F14", "#311D00", "#003594", "#FB4F14", 
+                     "#0076B6", "#203731", "#03202F", "#002C5F", "#006778", 
+                     "#E31837", "#000000", "#0080C6", "#003594", "#008E97", 
+                     "#4F2683", "#002244", "#D3BC8D", "#0B2265", "#125740", 
+                     "#004C54", "#FFB612", "#AA0000", "#002244", "#D50A0A", 
+                     "#4B92DB", "#5A1414"),
+    SecondaryColor = c("#FFB612", "#000000", "#9E7C0C", "#C60C30", "#BFC0BF", 
+                       "#0B162A", "#000000", "#FF3C00", "#869397", "#002244", 
+                       "#B0B7BC", "#FFB612", "#A71930", "#A2AAAD", "#D7A22A", 
+                       "#FFB81C", "#A5ACAF", "#FFC20E", "#FFA300", "#FC4C02", 
+                       "#FFC62F", "#C60C30", "#101820", "#A71930", "#000000", 
+                       "#A5ACAF", "#101820", "#B3995D", "#69BE28", "#34302B", 
+                       "#0C2340", "#FFB612")
+  )
+  
+  # Join `base_data` to create `pbp_full` without using create_pbp_full
+  pbp_full <- 
+    base_data$plays %>%
+    dplyr::left_join(base_data$games, by = 'gameId') %>%
+    dplyr::left_join(base_data$player_play, by = c('gameId', 'playId')) %>%
+    dplyr::left_join(base_data$players, by = 'nflId') %>%
+    dplyr::mutate(team = teamAbbr) %>%
+    dplyr::filter(gameId == gameid, playId == playid) %>%
+    
+    # Calculate `yards_to_success`
+    dplyr::mutate(
+      yards_to_success = ifelse(
+        down == "1", yardsToGo * 0.4,
+        ifelse(down == "2", yardsToGo * 0.6, yardsToGo)
+      )
+    ) %>%
+    
+    # Join with team_colors to add primary and secondary colors for home and visitor teams
+    left_join(team_colors, by = c("homeTeamAbbr" = "Abbreviation")) %>%
+    rename(homeTeamPrimaryColor = PrimaryColor, homeTeamSecondaryColor = SecondaryColor) %>%
+    left_join(team_colors, by = c("visitorTeamAbbr" = "Abbreviation")) %>%
+    rename(visitorTeamPrimaryColor = PrimaryColor, visitorTeamSecondaryColor = SecondaryColor) %>%
+    mutate(
+      # Assign the colors based on the team type (home or visitor) for each player
+      teamPrimaryColor = ifelse(team == homeTeamAbbr, homeTeamPrimaryColor, visitorTeamPrimaryColor),
+      teamSecondaryColor = ifelse(team == homeTeamAbbr, homeTeamSecondaryColor, visitorTeamSecondaryColor)
+    )
+  
+  # Select and filter tracking data for the specified game, play, and frame
+  tracking_df <- get(paste0("tracking_w", week, "_df")) %>%
+    dplyr::filter(gameId == gameid, playId == playid) %>%
+    dplyr::filter(if (frameid == 0) TRUE else frameId == frameid) %>%
+    mutate(
+      deltaxsign = if_else(dir <= 180, 1, -1),
+      deltaysign = if_else(dir <= 90 | dir >= 270, 1, -1),
+      dir_new = if_else(
+        dir <= 90, dir,
+        if_else(
+          dir <= 180, 180 - dir,
+          if_else(dir <= 270, 270 - dir, 360 - dir)
+        )
+      )
+    )
+  
+  # Separate football data and players data
+  football_df <- tracking_df %>%
+    dplyr::filter(club == "football")
+  
+  player_data <- pbp_full %>%
+    dplyr::inner_join(tracking_df %>% dplyr::filter(club != "football"), 
+                      by = c('gameId', 'playId', 'nflId'))
+  
+  # Combine player data and football data into a single output
+  result <- bind_rows(player_data, football_df)
+  
+  return(result)
+}
+
+
+
+#### Plotting Stage / Visualization ####
+
+# Set the gameId, playId, and week. frameId set to 0.
+gameId  <- 2022092503
+playId  <- 1310    
+week    <- 3 
+frameId <- 0 ## set to zero so we get the full dataset.
+
+## Get our full dataset for the play
+df_play_full <- get_pre_snap_moment(base_data, week, gameId, playId, frameId)
+
+## choose a fame and create plot
+suppressWarnings(build_directional_plot(frameId=1, 
+                                        playId=playId,
+                                        df=df_play_full, 
+                                        position_groups_to_show='all', 
+                                        scale_arrows_by = 2, 
+                                        movement_vector='a',
+                                        max_play_desc_len=80))
+
+#### Whole Play Animation ####
+#' Create our directional data viz gif!
+#' 
+#' @param df_plot - dataframe for plots - singular play 
+#' @param playid - play to show
+#' @param position_groups_to_show - 'all', 'offense', 'defense'. who to show vectors for.
+#' @param scale_arrows_by - increase or decrease length of vectors
+#' @param position_groups_to_show - 'all', 'offense', 'defense'. who to show vectors for.
+#' @param max_play_desc_len - maximum length of the play description to show in subtitle.
+#' 
+
+build_animated_directional_plot <- function(gameId,
+                                            playId,
+                                            df, 
+                                            position_groups_to_show = 'all', 
+                                            scale_arrows_by = 1, 
+                                            movement_vector = 'a',
+                                            max_play_desc_len = 80) {
+  # Set scalar and title based on movement_vector
+  if (movement_vector == 'a') {
+    df$scalar <- df$a
+    title <- 'Pre-Snap Acceleration Vectors for'
+  } else if (movement_vector == 's') {
+    df$scalar <- df$s
+    title <- 'Pre-Snap Speed Vectors for'
+  }
+  
+  # Filter data to the specific game and play
+  sample_play <- df %>%
+    dplyr::filter(gameId == gameId, playId == playId) %>%
+    mutate(
+      xnew = 2 * scale_arrows_by * scalar * cos(dir_new * pi / 180) * deltaxsign + x,
+      ynew = 2 * scale_arrows_by * scalar * sin(dir_new * pi / 180) * deltaysign + y,
+      playdescriptiontruncated = str_sub(playDescription, 1, max_play_desc_len),
+      teamPrimaryColor = ifelse(club == homeTeamAbbr, homeTeamPrimaryColor, visitorTeamPrimaryColor),
+      teamSecondaryColor = ifelse(club == homeTeamAbbr, homeTeamSecondaryColor, visitorTeamSecondaryColor),
+      positionShape = ifelse(position %in% c('WR', 'TE', 'T', 'QB', 'RB', 'C', 'G', 'FB'), 'circle', 'triangle')
+    )
+  
+  # Convert frameId to factor for animation
+  sample_play <- sample_play %>%
+    mutate(playframeid = as.factor(frameId))
+  
+  # Generate title and subtitle
+  title <- paste(
+    title,
+    sample_play %>% distinct(homeTeamAbbr) %>% pull(.),
+    'v',
+    sample_play %>% distinct(visitorTeamAbbr) %>% pull(.),
+    sample_play %>% distinct(gameDate) %>% pull(.),
+    sep = ' '
+  )
+  
+  subtitle <- paste0(
+    'PlayDesc: ', 
+    sample_play %>% distinct(playdescriptiontruncated) %>% pull(.),
+    sep = '\n'
+  )
+  
+  # Define positions to show
+  def_positions <- c('SS', 'DE', 'ILB', 'FS', 'CB', 'DT', 'NT', 'OLB')
+  off_positions <- c('WR', 'TE', 'T', 'QB', 'RB', 'C', 'G', 'FB')
+  positions_to_show <- switch(
+    tolower(position_groups_to_show),
+    'offense' = off_positions,
+    'defense' = def_positions,
+    c(def_positions, off_positions)
+  )
+  
+  # Field boundaries
+  xmin <- 0
+  xmax <- 160 / 3
+  ymin <- max(round(min(sample_play$x, na.rm = TRUE) - 10, -1), 0)
+  ymax <- min(round(max(sample_play$x, na.rm = TRUE) + 10, -1), 120)
+  
+  # Generate hash marks for the field
+  df.hash <- expand.grid(x = c(0, 23.36667, 29.96667, xmax), y = (10:110)) %>%
+    filter(!(floor(y %% 5) == 0), y < ymax, y > ymin)
+  
+  # Calculate the blue, yellow, and green lines
+  absoluteYardlineNumber <- df %>%
+    dplyr::filter(gameId == gameId, playId == playId) %>%
+    pull(absoluteYardlineNumber)
+  
+  yardsToGo <- df %>%
+    dplyr::filter(gameId == gameId, playId == playId) %>%
+    pull(yardsToGo)
+  
+  yards_to_success <- df %>%
+    dplyr::filter(gameId == gameId, playId == playId) %>%
+    pull(yards_to_success)  
+  
+  # Calculate the first down line's Y position
+  first_down_y_position <- absoluteYardlineNumber + yardsToGo
+  success_y_position <- absoluteYardlineNumber + yards_to_success
+  
+  # Build the plot
+  plot <- ggplot() +
+    # Field lines and hash marks
+    annotate("text", x = df.hash$x[df.hash$x < 55/2], 
+             y = df.hash$y[df.hash$x < 55/2], label = "_", hjust = 0, vjust = -0.2, na.rm = TRUE) + 
+    annotate("text", x = df.hash$x[df.hash$x > 55/2], 
+             y = df.hash$y[df.hash$x > 55/2], label = "_", hjust = 1, vjust = -0.2, na.rm = TRUE) + 
+    annotate("segment", x = xmin, 
+             y = seq(max(10, ymin), min(ymax, 110), by = 5), 
+             xend = xmax, 
+             yend = seq(max(10, ymin), min(ymax, 110), by = 5), na.rm = TRUE) + 
+    annotate("text", x = rep(12, 11), y = seq(10, 110, by = 10), 
+             label = c("G   ", seq(10, 50, by = 10), rev(seq(10, 40, by = 10)), "   G"), 
+             angle = 270, size = 4, na.rm = TRUE) + 
+    annotate("text", x = rep((xmax - 12), 11), y = seq(10, 110, by = 10), 
+             label = c("   G", seq(10, 50, by = 10), rev(seq(10, 40, by = 10)), "G   "), 
+             angle = 90, size = 4, na.rm = TRUE) + 
+    annotate("segment", x = c(xmin, xmin, xmax, xmax), 
+             y = c(ymin, ymax, ymax, ymin), 
+             xend = c(xmin, xmax, xmax, xmin), 
+             yend = c(ymax, ymax, ymin, ymin), colour = "black", na.rm = TRUE) + 
+    # Add the blue line for absoluteYardlineNumber
+    annotate("segment", 
+             x = xmin, xend = xmax, 
+             y = absoluteYardlineNumber, yend = absoluteYardlineNumber,
+             color = "blue", size = 1.5, lineend = "round") +
+    
+    # Add the yellow line for the first down line
+    annotate("segment", 
+             x = xmin, xend = xmax, 
+             y = first_down_y_position, yend = first_down_y_position,
+             color = "yellow", size = 1.5, lineend = "round") +
+    
+    # Add the green line for the success yard line
+    annotate("segment", 
+             x = xmin, xend = xmax, 
+             y = success_y_position, yend = success_y_position,
+             color = "green", size = 1.5, lineend = "round") +    
+    
+    # Player points
+    geom_point(data = sample_play, 
+               aes(x = (xmax - y), y = x, shape = positionShape, color = teamPrimaryColor, group = nflId), 
+               size = 8) +
+    scale_color_identity() +
+    scale_shape_manual(values = c("circle" = 16, "triangle" = 17)) +
+    # Arrows showing movement
+    geom_segment(data = sample_play %>% filter(position %in% positions_to_show),
+                 aes(x = (xmax - y), y = x, xend = (xmax - ynew), yend = xnew, group = nflId),
+                 arrow = arrow(angle = 20, type = 'closed', length = unit(0.2, 'cm'))) +
+    # Jersey numbers
+    geom_text(data = sample_play, 
+              aes(x = (xmax - y), y = x, label = jerseyNumber, color = teamSecondaryColor), 
+              size = 5) +
+    # Add football
+    geom_point(data = sample_play %>% filter(club == "football"),
+               aes(x = (xmax - y), y = x),
+               shape = 21, fill = "brown", color = "black", size = 5) +
+    # Titles and captions
+    labs(
+      x = NULL, y = NULL,
+      title = title,
+      subtitle = str_wrap(subtitle, 80),
+      caption = paste0("Data: 2025 Big Data Bowl Pre-Snap Tracking Data\n", 
+                       "GameId: ", unique(sample_play$gameId), "  |  ", 
+                       "PlayId: ", unique(sample_play$playId))
+    ) +
+    theme_bw() +
+    ylim(ymin, ymax) +
+    guides(shape = "none") +
+    theme(axis.text = element_blank()) +
+    # Animation
+    gganimate::transition_states(playframeid, transition_length = 2, state_length = 2)
+  
+  return(plot)
+}
+
+
+#### Run Gif function ####
+
+animated_plot <- build_animated_directional_plot(
+  gameId = gameId,
+  playId = playId,
+  df = df_play_full
+)
+
+animation <- 
+  gganimate::animate(animated_plot, nframes = 100, fps = 5)
+
+animation
+
+#save
+gganimate::anim_save("animated_plot_1.gif", animation)
