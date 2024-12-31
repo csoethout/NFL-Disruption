@@ -1,0 +1,100 @@
+#### View code used to generate our visualizations ####
+
+  ## Graph with NFL Logos ##
+  ## Credit to https://bradcongelio.com/nfl-analytics-with-r-book/01-nfl-analytics-and-r.html ##
+
+  # install.packages("nflverse")
+library(nflverse) # makes it easier to add team colors and logos
+library(ggimage) # used to include logos in graph 
+library(tidyverse)
+
+#### NFL analytics theme function #####
+# creates a theme to use on all visualizations
+nfl_analytics_theme <- function(..., base_size = 12) {
+  
+  theme(
+    text = element_text(family = "Roboto", size = base_size),
+    axis.ticks = element_blank(),
+    axis.title = element_text(color = "black",
+                              face = "bold"),
+    axis.text = element_text(color = "black",
+                             face = "bold"),
+    plot.title.position = "plot",
+    plot.title = element_text(size = 14,
+                              face = "bold",
+                              color = "black",
+                              vjust = .02,
+                              hjust = 0.5),
+    plot.subtitle = element_text(color = "black",
+                                 hjust = 0.5),
+    plot.caption = element_text(size = 8,
+                                face = "italic",
+                                color = "black"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major =  element_line(color = "#d0d0d0"),
+    panel.background = element_rect(fill = "#f7f7f7"),
+    plot.background = element_rect(fill = "#f7f7f7"),
+    panel.border = element_blank())
+}
+
+#### load in data to use for logos and team colors ####
+teams <- nflreadr::load_teams(current = TRUE) %>%
+  select(team_abbr, team_nick, team_color, team_color2, team_logo_wikipedia)
+
+# joined so logos are inlcuded for the offensive team pre-snap
+play_disruption_logos <- play_disruption %>% 
+
+#### deploy plotting ####
+plot1 <- play_disruption_logos %>% 
+  group_by(possessionTeam) %>% 
+  summarise(success_rate = mean(success_play),
+            avg_disruption = mean(disruption_factor),
+            team_logo_wikipedia = first(team_logo_wikipedia)) %>% 
+  ggplot(aes(x = avg_disruption, y = success_rate)) + 
+  geom_image(aes(image = team_logo_wikipedia), asp = 16/9) + 
+  geom_hline(yintercept = overall_means$mean_success_rate,
+             linewidth = 0.8,
+             color = "black",
+             linetype = "dashed") +
+  geom_vline(xintercept = overall_means$mean_avg_disruption,
+             linewidth = 0.8,
+             color = "black",
+             linetype = "dashed") +
+  labs(x = "Average Disruption", 
+       y = "Success Rate",
+       title = "Team Success Rate vs. Average Disruption") +
+  nfl_analytics_theme()
+
+  ############################################################################
+
+  ## Visualization comparing four teams ##
+
+  plot4 <- ggplot(plot_data, aes(x = homeTeamAbbr, y = Average, fill = homeTeamAbbr)) +
+  geom_bar(stat = "identity") +
+  geom_hline(aes(yintercept = League_Average), color = "black", linetype = "dashed", size = 0.8) +
+  facet_wrap(~Metric, scales = "free_y", nrow = 2) +
+  labs(
+    title = "Disruption Factor Metrics by Best/Worst Teams",
+    x = "Team",
+    y = "Average Value"
+  ) +
+  scale_fill_manual(
+    values = c(
+      "DEN" = "#FB4F14",  # Orange for Denver
+      "HOU" = "#003B5C",  # Blue for Chicago
+      "ATL" = "#A71930",   # Red for Kansas City Chiefs
+      "MIA" = "#00FFFF"   # Aqua for Miami
+    )
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(face = "bold", size = 10),
+    strip.background = element_rect(fill = "lightgrey", color = "white"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  scale_y_continuous(
+    limits = function(x) c(min(x) - 0.1 * abs(mean(x)), max(x) + 0.1 * abs(mean(x))), 
+    breaks = scales::pretty_breaks(n = 5)  # Adjust the number of breaks to your liking
+  )
+      
