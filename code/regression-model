@@ -1,0 +1,82 @@
+library(tidyverse)
+library(broom)
+library(caret)
+library(car)
+library(pscl)
+library(ResourceSelection)
+library(pROC)
+library(lm.beta)
+
+# Assuming `play_disruption` is your dataset
+set.seed(123) 
+
+# Split the data (80% training, 20% validation)
+trainIndex <- createDataPartition(play_disruption$success_play, p = 0.8, list = FALSE)
+train_data <- play_disruption[trainIndex, ]
+test_data <- play_disruption[-trainIndex, ]
+
+# Regression using disruption factor variable to find success (glm)
+regression_play <- glm(
+  success_play ~ 
+    down +
+    yardsToGo +
+    I(yardsToGo^2) +
+    offenseFormation +
+    expectedPoints +
+    pff_manZone +
+    prev_success_play +
+    playClockAtSnap +
+    disruption_factor,
+  data = train_data,
+  family = binomial
+)
+
+# Save predicted values on the test set
+success_prediction <- predict(regression_play, newdata = test_data, type = "response")
+
+# Check for significance of the model
+summary(regression_play)
+
+# McFadden's R-squared
+pR2(regression_play)
+
+# AUC
+roc_curve <- roc(test_data$success_play, success_prediction)
+auc_value <- auc(roc_curve)
+print(paste("AUC: ", auc_value))
+
+# Check for multicollinearity
+vif(regression_play)
+
+# Log-likelihood
+logLik(regression_play)
+
+# Deviance (Residual deviance)
+deviance(regression_play)
+
+# Hosmer-Lemeshow test
+hoslem.test(test_data$success_play, fitted(regression_play))
+
+# Lengths of success_play and fitted values (for checking model fitting)
+length(test_data$success_play)
+length(fitted(regression_play))
+
+# Standardized Beta coefficients
+regression_play_standardized <- lm.beta(regression_play)
+summary(regression_play_standardized)
+
+# Assuming roc_curve is your ROC object
+roc_plot <- ggroc(roc_curve, color = "blue") +  # Set ROC curve color to green
+  ggtitle("ROC Curve for Model", subtitle = paste("AUC = ", round(auc(roc_curve), 3))) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.subtitle = element_text(hjust = 0.5, size = 12),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12)
+  ) +
+  labs(x = "False Positive Rate", y = "True Positive Rate") +
+  # Add random chance line (50/50 line) from (0, 1) to (1, 0)
+  geom_segment(aes(x = 0, y = 1, xend = 1, yend = 0), color = "grey", size = 1)
+
+
